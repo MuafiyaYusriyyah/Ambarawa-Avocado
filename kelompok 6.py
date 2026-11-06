@@ -443,12 +443,11 @@ class AkuntansiApp:
                 elif r == r_bal: cell.font, cell.fill, cell.border = font_bold, fill_total, border_total
                 if c >= 3: cell.number_format = '#,##0'
 
-        # SHEET 6: LAPORAN KEUANGAN (LENGKAP: LABA RUGI, EKUITAS, NERACA)
+        # SHEET 6: LAPORAN KEUANGAN
         ws_lk = wb.create_sheet(title="Laporan Keuangan")
         header_perusahaan(ws_lk, "Laporan Keuangan Lengkap")
         
         row_idx = 5
-        # 1. LAPORAN LABA RUGI
         ws_lk.cell(row=row_idx, column=1, value="1. LAPORAN LABA RUGI").font = font_title
         row_idx += 1
         ws_lk.cell(row=row_idx, column=1, value="Pendapatan Operasional:").font = font_bold
@@ -490,7 +489,6 @@ class AkuntansiApp:
         ws_lk.cell(row=laba_row, column=2).fill = fill_selisih
         row_idx += 3
 
-        # 2. LAPORAN PERUBAHAN EKUITAS
         ws_lk.cell(row=row_idx, column=1, value="2. LAPORAN PERUBAHAN EKUITAS").font = font_title
         row_idx += 1
         mod_awal_row = row_idx
@@ -508,7 +506,6 @@ class AkuntansiApp:
         ws_lk.cell(row=mod_akhir_row, column=2).font = font_bold
         row_idx += 3
 
-        # 3. LAPORAN POSISI KEUANGAN (NERACA)
         ws_lk.cell(row=row_idx, column=1, value="3. LAPORAN POSISI KEUANGAN (NERACA)").font = font_title
         row_idx += 1
         ws_lk.cell(row=row_idx, column=1, value="ASET").font = font_bold
@@ -581,6 +578,36 @@ class AkuntansiApp:
                 cell.border = border_total if r == tot_jp_r else border_data
                 if c in [4, 5]: cell.number_format = '#,##0'
 
+        # SHEET 8: NERACA SALDO SETELAH PENUTUPAN (AKUN RIIL/PERMANEN SAJA)
+        ws_nsp = wb.create_sheet(title="NS Setelah Penutupan")
+        header_perusahaan(ws_nsp, "Neraca Saldo Setelah Penutupan")
+        ws_nsp.append(["Kode Akun", "Nama Akun", "Debit (Rp)", "Kredit (Rp)"])
+        for cell in ws_nsp[5]: cell.font, cell.fill, cell.alignment = font_header, fill_header, Alignment(horizontal="center")
+
+        start_nsp = 6
+        count_nsp = 0
+        for idx, a in enumerate(self.accounts, start=7):
+            # Hanya mengambil akun riil (Aset, Liabilitas, Ekuitas Modal Akhir)
+            if a["Kode"].startswith("1") or a["Kode"].startswith("2"):
+                ws_nsp.append([a["Kode"], a["Nama"], f"='Neraca Lajur'!K{idx}", f"='Neraca Lajur'!L{idx}"])
+                count_nsp += 1
+            elif a["Kode"] == "3-101":
+                # Modal Pemilik yang sudah disesuaikan setelah penutupan
+                ws_nsp.append([a["Kode"], a["Nama"], 0, f"='Laporan Keuangan'!B{mod_akhir_row}"])
+                count_nsp += 1
+
+        end_nsp = start_nsp + count_nsp - 1
+        tot_nsp_r = end_nsp + 1
+        ws_nsp.append(["TOTAL", "", f"=SUM(C{start_nsp}:C{end_nsp})", f"=SUM(D{start_nsp}:D{end_nsp})"])
+
+        for r in range(6, tot_nsp_r + 1):
+            for c in range(1, 5):
+                cell = ws_nsp.cell(row=r, column=c)
+                cell.font = font_bold if r == tot_nsp_r else font_normal
+                cell.border = border_total if r == tot_nsp_r else border_data
+                if c in [3, 4]: cell.number_format = '#,##0'
+
+        # Auto width kolom seluruh sheet
         for sheet in wb.worksheets:
             for col in sheet.columns:
                 max_len = max(len(str(cell.value or '')) for cell in col)
