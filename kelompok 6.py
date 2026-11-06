@@ -1,5 +1,6 @@
+import os
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
@@ -7,9 +8,13 @@ from openpyxl.utils import get_column_letter
 class AkuntansiApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Aplikasi Siklus Akuntansi - Ambarawa Avocado")
-        self.root.geometry("950x700")
+        self.root.title("Siklus Akuntansi Harian (Terpusat) - Ambarawa Avocado")
+        self.root.geometry("980x750")
         self.root.configure(bg="#F4F6F9")
+
+        # Path File Master Excel (Semua data tersimpan di 1 file ini)
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.excel_pusat_path = os.path.join(base_dir, "Siklus_Akuntansi_Pusat_Ambarawa_Avocado.xlsx")
 
         # Master Akun Ambarawa Avocado
         self.accounts = [
@@ -48,15 +53,15 @@ class AkuntansiApp:
             {"Kode": "9-999", "Nama": "Ikhtisar Laba Rugi", "Tipe": "Nominal", "Normal": "Kredit"},
         ]
 
-        # List Penyimpan Transaksi
         self.ju_list = []
         self.ajp_list = []
 
+    
         # ------------------- HEADER GUI -------------------
         header_frame = tk.Frame(self.root, bg="#1F4E78", pady=12)
         header_frame.pack(fill=tk.X)
         
-        lbl_title = tk.Label(header_frame, text="Siklus Akuntansi Ambarawa Avocado", font=("Segoe UI", 16, "bold"), fg="white", bg="#1F4E78")
+        lbl_title = tk.Label(header_frame, text="Siklus Akuntansi Ambarawa Avocado (Pusat)", font=("Segoe UI", 16, "bold"), fg="white", bg="#1F4E78")
         lbl_title.pack()
 
         # ------------------- TAB SYSTEM -------------------
@@ -64,13 +69,16 @@ class AkuntansiApp:
         self.tab1 = ttk.Frame(self.tabControl)
         self.tab2 = ttk.Frame(self.tabControl)
 
-        self.tabControl.add(self.tab1, text="Input Jurnal Umum")
-        self.tabControl.add(self.tab2, text="Input Jurnal Penyesuaian (AJP)")
+        self.tabControl.add(self.tab1, text="Input Jurnal Umum Baru")
+        self.tabControl.add(self.tab2, text="Input Jurnal Penyesuaian Baru (AJP)")
         self.tabControl.pack(expand=1, fill="both", padx=10, pady=10)
 
         # Build UI Tabs
         self.build_ju_tab()
         self.build_ajp_tab()
+
+        # OTOMATIS BACA DATA LAMA DARI FILE EXCEL JIKA FILE SUDAH ADA
+        self.muat_data_dari_excel()
 
         # ------------------- BOTTOM CONTAINER -------------------
         bottom_frame = tk.Frame(self.root, bg="#F4F6F9", pady=10)
@@ -78,7 +86,7 @@ class AkuntansiApp:
 
         btn_excel = tk.Button(
             bottom_frame, 
-            text=" Process & Generate Excel Laporan Keuangan Lengkap", 
+            text=" Update & Simpan ke Excel Master ", 
             font=("Segoe UI", 11, "bold"), 
             bg="#2F5597", 
             fg="white", 
@@ -170,12 +178,68 @@ class AkuntansiApp:
         btn_del = tk.Button(self.tab2, text="Hapus Baris Terpilih", bg="#C0392B", fg="white", command=self.hapus_ajp)
         btn_del.pack(anchor="e", padx=10, pady=5)
 
+    def muat_data_dari_excel(self):
+        """ Membaca file Excel yang sudah ada agar data tidak ke-reset saat buka Tkinter """
+        if not os.path.exists(self.excel_pusat_path):
+            return
+
+        try:
+            wb = openpyxl.load_workbook(self.excel_pusat_path, data_only=True)
+            
+            # Read JU
+            if "Jurnal Umum" in wb.sheetnames:
+                ws_ju = wb["Jurnal Umum"]
+                for r in range(6, ws_ju.max_row + 1):
+                    val_tgl = ws_ju.cell(row=r, column=1).value
+                    val_akun = ws_ju.cell(row=r, column=2).value
+                    val_ref = ws_ju.cell(row=r, column=3).value
+                    val_deb = ws_ju.cell(row=r, column=4).value
+                    val_kre = ws_ju.cell(row=r, column=5).value
+
+                    # Cek agar baris TOTAL / baris kosong tidak ikut terbaca sebagai data
+                    if val_tgl and str(val_tgl).strip().upper() != "TOTAL":
+                        deb = float(val_deb) if val_deb is not None else 0.0
+                        kre = float(val_kre) if val_kre is not None else 0.0
+                        
+                        # Bersihkan format string tanggal
+                        tgl_str = str(val_tgl).split(" ")[0]
+                        
+                        item = {"Tanggal": tgl_str, "Akun": str(val_akun), "Ref": str(val_ref), "Debit": deb, "Kredit": kre}
+                        self.ju_list.append(item)
+                        self.tree_ju.insert("", "end", values=(tgl_str, str(val_akun), str(val_ref), f"{deb:,.0f}", f"{kre:,.0f}"))
+
+            # Read AJP
+            if "Jurnal Penyesuai & BB" in wb.sheetnames:
+                ws_ajp = wb["Jurnal Penyesuai & BB"]
+                for r in range(6, ws_ajp.max_row + 1):
+                    val_tgl = ws_ajp.cell(row=r, column=1).value
+                    val_akun = ws_ajp.cell(row=r, column=2).value
+                    val_ref = ws_ajp.cell(row=r, column=3).value
+                    val_deb = ws_ajp.cell(row=r, column=4).value
+                    val_kre = ws_ajp.cell(row=r, column=5).value
+
+                    if val_tgl and str(val_tgl).strip().upper() != "TOTAL":
+                        deb = float(val_deb) if val_deb is not None else 0.0
+                        kre = float(val_kre) if val_kre is not None else 0.0
+
+                        tgl_str = str(val_tgl).split(" ")[0]
+
+                        item = {"Tanggal": tgl_str, "Akun": str(val_akun), "Ref": str(val_ref), "Debit": deb, "Kredit": kre}
+                        self.ajp_list.append(item)
+                        self.tree_ajp.insert("", "end", values=(tgl_str, str(val_akun), str(val_ref), f"{deb:,.0f}", f"{kre:,.0f}"))
+
+        except Exception as e:
+            print(f"Informasi: Gagal memuat file Excel lama: {e}")
+
     def tambah_ju(self):
         tgl = self.ent_tgl_ju.get()
         selected_acc = self.combo_akun_ju.get()
+        deb_str = self.ent_debit_ju.get().strip()
+        kre_str = self.ent_kredit_ju.get().strip()
+
         try:
-            debit = float(self.ent_debit_ju.get())
-            kredit = float(self.ent_kredit_ju.get())
+            debit = float(deb_str) if deb_str != "" else 0.0
+            kredit = float(kre_str) if kre_str != "" else 0.0
         except ValueError:
             messagebox.showerror("Error", "Debit dan Kredit harus berupa angka!")
             return
@@ -202,9 +266,12 @@ class AkuntansiApp:
     def tambah_ajp(self):
         tgl = self.ent_tgl_ajp.get()
         selected_acc = self.combo_akun_ajp.get()
+        deb_str = self.ent_debit_ajp.get().strip()
+        kre_str = self.ent_kredit_ajp.get().strip()
+
         try:
-            debit = float(self.ent_debit_ajp.get())
-            kredit = float(self.ent_kredit_ajp.get())
+            debit = float(deb_str) if deb_str != "" else 0.0
+            kredit = float(kre_str) if kre_str != "" else 0.0
         except ValueError:
             messagebox.showerror("Error", "Debit dan Kredit harus berupa angka!")
             return
@@ -239,20 +306,12 @@ class AkuntansiApp:
             messagebox.showerror("Jurnal Tidak Balance", f"Total Debit ({tot_d:,.0f}) dan Kredit ({tot_k:,.0f}) Jurnal Umum tidak seimbang!")
             return
 
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".xlsx",
-            filetypes=[("Excel Files", "*.xlsx")],
-            title="Simpan Laporan Akuntansi",
-            initialfile="Siklus_Akuntansi_Ambarawa_Avocado.xlsx"
-        )
-        
-        if not file_path: return
-
         try:
-            self.generate_excel(file_path)
-            messagebox.showinfo("Berhasil!", f"Siklus Akuntansi Berhasil Diproses!\nFile disimpan di:\n{file_path}")
+            # Menyimpan secara permanen ke 1 file master yang sama
+            self.generate_excel(self.excel_pusat_path)
+            messagebox.showinfo("Berhasil!", f"Data Akuntansi Berhasil Diperbarui!\nData tersimpan di file master:\n{os.path.abspath(self.excel_pusat_path)}")
         except Exception as e:
-            messagebox.showerror("Error", f"Terjadi kesalahan saat membuat Excel:\n{str(e)}")
+            messagebox.showerror("Error", f"Terjadi kesalahan saat menyimpan ke Excel Master:\n{str(e)}")
 
     def generate_excel(self, file_path):
         wb = openpyxl.Workbook()
@@ -287,7 +346,7 @@ class AkuntansiApp:
 
         # SHEET 1: JURNAL UMUM
         ws_ju = wb.create_sheet(title="Jurnal Umum")
-        header_perusahaan(ws_ju, "Jurnal Umum")
+        header_perusahaan(ws_ju, "Jurnal Umum Pusat")
         ws_ju.append(["Tanggal", "Nama Akun", "Ref", "Debit (Rp)", "Kredit (Rp)"])
         for cell in ws_ju[5]: cell.font, cell.fill, cell.alignment = font_header, fill_header, Alignment(horizontal="center")
         for item in self.ju_list: ws_ju.append([item["Tanggal"], item["Akun"], item["Ref"], item["Debit"], item["Kredit"]])
@@ -300,7 +359,7 @@ class AkuntansiApp:
                 cell.border = border_total if r == tot_ju_row else border_data
                 if c in [4, 5]: cell.number_format = '#,##0'
 
-        # SHEET 2: BUKU BESAR (1 SHEET ALL AKUN)
+        # SHEET 2: BUKU BESAR
         ws_bb = wb.create_sheet(title="Buku Besar")
         header_perusahaan(ws_bb, "Buku Besar (Gabungan)")
         curr_r = 5
@@ -376,7 +435,7 @@ class AkuntansiApp:
                 cell.border = border_total if r == tot_ajp_r else border_data
                 if c in [4, 5]: cell.number_format = '#,##0'
 
-        # SHEET 5: NERACA LAJUR (10 KOLOM)
+        # SHEET 5: NERACA LAJUR
         ws_nl = wb.create_sheet(title="Neraca Lajur")
         header_perusahaan(ws_nl, "Neraca Lajur (Worksheet)")
         ws_nl.append(["Kode", "Nama Akun", "Neraca Saldo", "", "Penyesuaian", "", "NS Disesuaikan", "", "Laba Rugi", "", "Neraca", ""])
@@ -578,7 +637,7 @@ class AkuntansiApp:
                 cell.border = border_total if r == tot_jp_r else border_data
                 if c in [4, 5]: cell.number_format = '#,##0'
 
-        # SHEET 8: NERACA SALDO SETELAH PENUTUPAN (AKUN RIIL/PERMANEN SAJA)
+        # SHEET 8: NERACA SALDO SETELAH PENUTUPAN
         ws_nsp = wb.create_sheet(title="NS Setelah Penutupan")
         header_perusahaan(ws_nsp, "Neraca Saldo Setelah Penutupan")
         ws_nsp.append(["Kode Akun", "Nama Akun", "Debit (Rp)", "Kredit (Rp)"])
@@ -587,12 +646,10 @@ class AkuntansiApp:
         start_nsp = 6
         count_nsp = 0
         for idx, a in enumerate(self.accounts, start=7):
-            # Hanya mengambil akun riil (Aset, Liabilitas, Ekuitas Modal Akhir)
             if a["Kode"].startswith("1") or a["Kode"].startswith("2"):
                 ws_nsp.append([a["Kode"], a["Nama"], f"='Neraca Lajur'!K{idx}", f"='Neraca Lajur'!L{idx}"])
                 count_nsp += 1
             elif a["Kode"] == "3-101":
-                # Modal Pemilik yang sudah disesuaikan setelah penutupan
                 ws_nsp.append([a["Kode"], a["Nama"], 0, f"='Laporan Keuangan'!B{mod_akhir_row}"])
                 count_nsp += 1
 
@@ -607,7 +664,6 @@ class AkuntansiApp:
                 cell.border = border_total if r == tot_nsp_r else border_data
                 if c in [3, 4]: cell.number_format = '#,##0'
 
-        # Auto width kolom seluruh sheet
         for sheet in wb.worksheets:
             for col in sheet.columns:
                 max_len = max(len(str(cell.value or '')) for cell in col)
