@@ -1,10 +1,11 @@
-"""Koneksi MySQL, pembuatan tabel otomatis, dan daftar akun awal."""
+"""Koneksi MySQL, pembuatan tabel otomatis, daftar akun awal, dan migrasi dari versi lama."""
 import datetime as dt
 from contextlib import contextmanager
 
 import mysql.connector
 
-from config import DB
+from core.config import DB
+from core.konstanta import DIKUNCI
 
 
 def konek(pakai_db=True):
@@ -45,14 +46,17 @@ SKEMA = [
     "CREATE TABLE IF NOT EXISTS saldo_awal (kode VARCHAR(10) PRIMARY KEY, debit DECIMAL(18,2) DEFAULT 0, "
     "kredit DECIMAL(18,2) DEFAULT 0, qty DECIMAL(18,2) DEFAULT 0)",
     "CREATE TABLE IF NOT EXISTS jurnal (id INT AUTO_INCREMENT PRIMARY KEY, tanggal DATE, bukti VARCHAR(30), "
-    "keterangan VARCHAR(255), jenis VARCHAR(4), sumber VARCHAR(12) DEFAULT 'MANUAL')",   # JU, AJP, PNT
+    "keterangan VARCHAR(255), jenis VARCHAR(4), sumber VARCHAR(12) DEFAULT 'MANUAL')",   # jenis: JU, AJP, PNT
     "CREATE TABLE IF NOT EXISTS jurnal_detail (id INT AUTO_INCREMENT PRIMARY KEY, jurnal_id INT, kode VARCHAR(10), "
     "debit DECIMAL(18,2) DEFAULT 0, kredit DECIMAL(18,2) DEFAULT 0, "
     "FOREIGN KEY (jurnal_id) REFERENCES jurnal(id) ON DELETE CASCADE)",
     "CREATE TABLE IF NOT EXISTS persediaan_mutasi (id INT AUTO_INCREMENT PRIMARY KEY, tanggal DATE, kode VARCHAR(10), "
     "jenis VARCHAR(6), qty DECIMAL(18,2), harga DECIMAL(18,4), total DECIMAL(18,2), keterangan VARCHAR(255), jurnal_id INT)",
-    "CREATE TABLE IF NOT EXISTS nota (id INT AUTO_INCREMENT PRIMARY KEY, tipe VARCHAR(4), no_nota VARCHAR(30), tanggal DATE, "
-    "pihak VARCHAR(100), jenis VARCHAR(40), qty DECIMAL(18,2), harga DECIMAL(18,2), total DECIMAL(18,2), cara VARCHAR(20), jurnal_id INT)",
+    # semua input Penerimaan / Pengeluaran / Transaksi Lainnya dicatat di sini, lalu otomatis menjadi jurnal umum
+    "CREATE TABLE IF NOT EXISTS transaksi (id INT AUTO_INCREMENT PRIMARY KEY, kelompok VARCHAR(8), item VARCHAR(80), "
+    "no_bukti VARCHAR(30), tanggal DATE, pihak VARCHAR(100), jenis VARCHAR(40), qty DECIMAL(18,2), harga DECIMAL(18,2), "
+    "total DECIMAL(18,2), cara VARCHAR(30), keterangan VARCHAR(255), jurnal_id INT)",
+    "CREATE TABLE IF NOT EXISTS migrasi (nama VARCHAR(40) PRIMARY KEY)",
 ]
 
 # kode | nama | kelompok | saldo normal (D/K)
@@ -88,7 +92,36 @@ AKUN = """1-101|Kas|Aset|D
 7-105|Beban Penyusutan|Beban|D
 7-106|Beban Perlengkapan|Beban|D
 7-107|Beban Kompensasi Kerusakan Barang|Beban|D
-7-108|Beban Operasional Lainnya|Beban|D"""
+7-108|Beban Operasional Lainnya|Beban|D
+7-109|Beban Air|Beban|D
+7-110|Beban Listrik|Beban|D"""
+
+
+def _migrasi():
+    """Penyesuaian satu kali untuk database dari versi lama. Dicatat di tabel `migrasi` supaya tidak diulang
+    (jadi akun yang sudah dihapus pengguna tidak muncul lagi)."""
+    sudah = {r["nama"] for r in ambil("SELECT nama FROM migrasi")}
+    nota_lama = []
+    if "nota_ke_transaksi" not in sudah:
+        try:
+            nota_lama = ambil("SELECT * FROM nota ORDER BY id")
+        except Exception:
+            nota_lama = []                      # tabel nota tidak ada = instalasi baru
+    with cursor(True) as c:
+        if "akun_air_listrik" not in sudah:
+            for kode, nama in (("7-109", "Beban Air"), ("7-110", "Beban Listrik")):
+                c.execute("SELECT kode FROM akun WHERE kode=%s", (kode,))
+                if not c.fetchall():
+                    c.execute("INSERT INTO akun (kode,nama,kelompok,saldo_normal,sistem) VALUES (%s,%s,'Beban','D',0)", (kode, nama))
+            c.execute("INSERT INTO migrasi (nama) VALUES ('akun_air_listrik')")
+        if "nota_ke_transaksi" not in sudah:
+            for n in nota_lama:
+                jual = n["tipe"] == "JUAL"
+                c.execute("INSERT INTO transaksi (kelompok,item,no_bukti,tanggal,pihak,jenis,qty,harga,total,cara,keterangan,jurnal_id) "
+                          "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'',%s)",
+                          ("TERIMA" if jual else "KELUAR", ("Penjualan " if jual else "Pembelian ") + str(n["jenis"]), n["no_nota"],
+                           n["tanggal"], n["pihak"], n["jenis"], n["qty"], n["harga"], n["total"], n["cara"], n["jurnal_id"]))
+            c.execute("INSERT INTO migrasi (nama) VALUES ('nota_ke_transaksi')")
 
 
 def siapkan_database():
@@ -108,18 +141,10 @@ def siapkan_database():
             for baris in AKUN.splitlines():
                 kode, nama, kel, normal = baris.split("|")
                 c.execute("INSERT INTO akun (kode,nama,kelompok,saldo_normal,sistem) VALUES (%s,%s,%s,%s,%s)",
-                          (kode, nama, kel, normal, 1 if kode == "3-103" else 0))
+                          (kode, nama, kel, normal, 1 if kode in DIKUNCI else 0))
         c.execute("SELECT COUNT(*) n FROM pengaturan")
         if c.fetchone()["n"] == 0:
             th = dt.date.today().year
             c.execute("INSERT INTO pengaturan VALUES (1,%s,%s,%s,%s)",
                       ("Ambarawa Avocado", f"Periode {th}", dt.date(th, 1, 1), dt.date(th, 12, 31)))
-
-def get_db_connection():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="",
-        database="alpukat estate"
-    )
-
+    _migrasi()
