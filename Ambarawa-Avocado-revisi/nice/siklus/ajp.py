@@ -18,3 +18,5 @@ def halaman():
 
 def halaman_input():
     ju.form_input("AJP", "AJP", "Jurnal Penyesuaian", CEPAT)
+
+    
